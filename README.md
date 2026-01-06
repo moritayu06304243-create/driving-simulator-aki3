@@ -1,1 +1,390 @@
-# driving-simulator-aki3
+**<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ドライビングシミュレーター - Firebase統合版</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; overflow: hidden; background: #1a1a1a; }
+        #gameContainer { width: 100vw; height: 100vh; position: relative; display: none; }
+        
+        /* 入力フォームのスタイル */
+        #entryForm {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: rgba(255, 255, 255, 0.95); padding: 30px; border-radius: 15px;
+            text-align: center; z-index: 100; box-shadow: 0 0 20px rgba(0,0,0,0.5);
+            width: 340px;
+        }
+        #entryForm h2 { margin-bottom: 20px; color: #333; }
+        .input-group { margin-bottom: 15px; text-align: left; }
+        .input-group label { display: block; margin-bottom: 5px; color: #666; font-weight: bold; }
+        .input-group input, .input-group select {
+            width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 5px; font-size: 16px;
+        }
+        #startBtn {
+            width: 100%; padding: 12px; background: #4CAF50; color: white; border: none;
+            border-radius: 5px; cursor: pointer; font-size: 18px; margin-top: 10px;
+        }
+        #startBtn:hover { background: #45a049; }
+
+        /* ゲーム画面UI */
+        #info { position: absolute; top: 20px; left: 20px; background: rgba(0, 0, 0, 0.7); color: white; padding: 20px; border-radius: 10px; font-family: monospace; z-index: 10; }
+        #speed { font-size: 28px; font-weight: bold; margin-bottom: 10px; }
+        #score { font-size: 20px; }
+        #reactionTime { font-size: 20px; margin-top: 10px; color: #ffcc00; }
+        #avgReactionTime { font-size: 16px; color: #cccccc; }
+        
+        /* 終了ボタン */
+        #exitBtn {
+            position: absolute; top: 20px; right: 20px; padding: 10px 20px;
+            background: #ff4b4b; color: white; border: none; border-radius: 5px;
+            font-weight: bold; cursor: pointer; z-index: 15;
+        }
+        #exitBtn:hover { background: #ff0000; }
+
+        #controls { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); background: rgba(0, 0, 0, 0.7); color: white; padding: 15px 30px; border-radius: 10px; text-align: center; z-index: 10; }
+        #gameOver { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0, 0, 0, 0.9); color: white; padding: 40px; border-radius: 15px; text-align: center; z-index: 20; display: none; }
+        #gameOver button { margin-top: 20px; padding: 15px 30px; font-size: 18px; background: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer; }
+    </style>
+</head>
+<body>
+
+    <div id="entryForm">
+        <h2>実験参加者情報</h2>
+        <div class="input-group">
+            <label for="age">年齢</label>
+            <input type="number" id="age" min="0" max="120" placeholder="例: 22">
+        </div>
+        <div class="input-group">
+            <label for="gender">性別</label>
+            <select id="gender">
+                <option value="">選択してください</option>
+                <option value="male">男性</option>
+                <option value="female">女性</option>
+                <option value="other">その他 / 回答しない</option>
+            </select>
+        </div>
+        <button id="startBtn" onclick="startGame()">ゲーム開始</button>
+    </div>
+
+    <div id="gameContainer">
+        <button id="exitBtn" onclick="endTest()">テストを終了する</button>
+        <div id="info">
+            <div id="speed">速度: 0 km/h</div>
+            <div id="score">スコア: 0</div>
+            <div id="reactionTime">反応時間: -- 秒</div>
+            <div id="avgReactionTime">平均反応時間: -- 秒</div>
+        </div>
+        <div id="controls">
+            <h3>操作方法</h3>
+            <p>【スペースキー】: 突然現れる障害物を消去</p>
+            <p>↓/S: ブレーキ</p>
+        </div>
+        <div id="gameOver">
+            <h2>テスト終了</h2>
+            <p id="finalScore"></p>
+            <p id="finalAvgReaction"></p>
+            <button onclick="location.reload()">タイトルへ戻る</button>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
+        import { getAnalytics, logEvent } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-analytics.js";
+
+        // 新しいFirebase設定
+        const firebaseConfig = {
+            apiKey: "AIzaSyDvFML712aElXwRJDZPj2dtYhERdZuXjL4",
+            authDomain: "phychology-test-0106.firebaseapp.com",
+            projectId: "phychology-test-0106",
+            storageBucket: "phychology-test-0106.firebasestorage.app",
+            messagingSenderId: "188552805226",
+            appId: "1:188552805226:web:f59c94ff7feec92a8f8313",
+            measurementId: "G-M5NF6K5SE7"
+        };
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const analytics = getAnalytics(app);
+
+        // デバッグモードのヒントをコンソールに表示
+        console.log("Firebase initialized with new config.");
+
+        // グローバル関数として露出（ゲーム本体から呼び出せるようにする）
+        window.logToFirebase = (eventName, params) => {
+            logEvent(analytics, eventName, params);
+            console.log(`Firebase Event: ${eventName}`, params);
+        };
+    </script>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    
+    <script>
+        // --- ゲームエンジンロジック ---
+        let scene, camera, renderer;
+        let road, playerCar;
+        let obstacles = [];
+        let roadLines = [];
+
+        const game = {
+            velocity: 0,
+            targetVelocity: 0.4,
+            position: 0,
+            gameOver: false,
+            braking: false,
+            playerX: -2,
+            reactionTimes: [],
+            isMeasuringReaction: false,
+            measurementStartTime: null,
+            lastObstacleZ: -50,
+            subjectInfo: { age: null, gender: null }
+        };
+
+        function startGame() {
+            const ageInput = document.getElementById('age').value;
+            const genderInput = document.getElementById('gender').value;
+
+            if (!ageInput || !genderInput) {
+                alert('年齢と性別を入力してください。');
+                return;
+            }
+            
+            // THREE.jsが読み込まれているか確認
+            if (typeof THREE === 'undefined') {
+                alert('ゲームライブラリの読み込み中です。少しお待ちください...');
+                setTimeout(() => startGame(), 1000);
+                return;
+            }
+
+            game.subjectInfo.age = ageInput;
+            game.subjectInfo.gender = genderInput;
+
+            // Firebaseへ開始イベントを送信
+            if (window.logToFirebase) {
+                window.logToFirebase('test_start', {
+                    age: ageInput,
+                    gender: genderInput
+                });
+            }
+
+            document.getElementById('entryForm').style.display = 'none';
+            document.getElementById('gameContainer').style.display = 'block';
+
+            // 少し待ってからinitを実行
+            setTimeout(() => {
+                init();
+            }, 100);
+        }
+
+        function init() {
+            console.log("Initializing game...");
+            console.log("THREE.js available:", typeof THREE !== 'undefined');
+            
+            scene = new THREE.Scene();
+            scene.fog = new THREE.Fog(0x87CEEB, 50, 200);
+            scene.background = new THREE.Color(0x87CEEB);
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 5, 10);
+            camera.lookAt(0, 0, 0);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.getElementById('gameContainer').appendChild(renderer.domElement);
+            
+            console.log("Renderer created and added to DOM");
+
+            scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
+            directionalLight.position.set(10, 20, 10);
+            scene.add(directionalLight);
+
+            createRoad();
+            createCar();
+            createRoadLines();
+            
+            console.log("Scene created, starting animation");
+            
+            // 初期レンダリングを実行
+            renderer.render(scene, camera);
+
+            window.addEventListener('keydown', (e) => {
+                if (e.code === 'Space' && !game.gameOver) {
+                    e.preventDefault();
+                    dodgeObstacle();
+                }
+                if ((e.key === 'ArrowDown' || e.key.toLowerCase() === 's') && !game.gameOver) {
+                    game.braking = true;
+                }
+            });
+
+            window.addEventListener('keyup', (e) => {
+                if (e.key === 'ArrowDown' || e.key.toLowerCase() === 's') game.braking = false;
+            });
+
+            animate();
+        }
+
+        function createRoad() {
+            const roadGeometry = new THREE.PlaneGeometry(10, 300);
+            const roadMaterial = new THREE.MeshLambertMaterial({ color: 0x333333 });
+            road = new THREE.Mesh(roadGeometry, roadMaterial);
+            road.rotation.x = -Math.PI / 2;
+            scene.add(road);
+
+            const grass = new THREE.Mesh(
+                new THREE.PlaneGeometry(100, 300),
+                new THREE.MeshLambertMaterial({ color: 0x228B22 })
+            );
+            grass.rotation.x = -Math.PI / 2;
+            grass.position.y = -0.1;
+            scene.add(grass);
+        }
+
+        function createRoadLines() {
+            for (let i = 0; i < 30; i++) {
+                const line = new THREE.Mesh(
+                    new THREE.BoxGeometry(0.2, 0.05, 3),
+                    new THREE.MeshBasicMaterial({ color: 0xFFFFFF })
+                );
+                line.position.set(0, 0.05, -i * 10);
+                roadLines.push(line);
+                scene.add(line);
+            }
+        }
+
+        function createCar() {
+            const carGroup = new THREE.Group();
+            const body = new THREE.Mesh(
+                new THREE.BoxGeometry(1.5, 0.8, 2.5),
+                new THREE.MeshLambertMaterial({ color: 0xFF0000 })
+            );
+            body.position.y = 0.6;
+            carGroup.add(body);
+            carGroup.position.set(game.playerX, 0, 0);
+            playerCar = carGroup;
+            scene.add(carGroup);
+        }
+
+        function createObstacle() {
+            const obstacle = new THREE.Mesh(
+                new THREE.BoxGeometry(1.5, 1, 1.5),
+                new THREE.MeshLambertMaterial({ color: 0xFF0000, transparent: false })
+            );
+            obstacle.position.set(game.playerX, 0.5, -15); 
+            obstacles.push(obstacle);
+            scene.add(obstacle);
+
+            if (!game.isMeasuringReaction) {
+                game.isMeasuringReaction = true;
+                game.measurementStartTime = performance.now();
+            }
+        }
+
+        function dodgeObstacle() {
+            for (let i = obstacles.length - 1; i >= 0; i--) {
+                const obstacle = obstacles[i];
+                if (obstacle.position.z > -20 && obstacle.position.z < 5) {
+                    scene.remove(obstacle);
+                    obstacles.splice(i, 1);
+                    if (game.isMeasuringReaction && game.measurementStartTime !== null) {
+                        const reactionTime = (performance.now() - game.measurementStartTime) / 1000;
+                        game.reactionTimes.push(reactionTime);
+                        game.isMeasuringReaction = false;
+                        game.measurementStartTime = null;
+                        updateReactionTimeDisplay();
+                    }
+                    break; 
+                }
+            }
+        }
+
+        function updateReactionTimeDisplay() {
+            const reactionTimeDiv = document.getElementById('reactionTime');
+            const avgReactionTimeDiv = document.getElementById('avgReactionTime');
+            if (game.reactionTimes.length > 0) {
+                const lastReaction = game.reactionTimes[game.reactionTimes.length - 1];
+                reactionTimeDiv.textContent = `反応時間: ${lastReaction.toFixed(3)} 秒`;
+                const total = game.reactionTimes.reduce((sum, time) => sum + time, 0);
+                avgReactionTimeDiv.textContent = `平均反応時間: ${(total / game.reactionTimes.length).toFixed(3)} 秒`;
+            }
+        }
+
+        function animate() {
+            if (game.gameOver) return;
+            requestAnimationFrame(animate);
+
+            if (game.braking) {
+                game.velocity = Math.max(0, game.velocity - 0.02);
+            } else {
+                game.velocity += (game.targetVelocity - game.velocity) * 0.05;
+            }
+
+            game.position += game.velocity;
+
+            roadLines.forEach(line => {
+                line.position.z += game.velocity;
+                if (line.position.z > 10) line.position.z -= 300;
+            });
+
+            if (game.position - game.lastObstacleZ > 60 + Math.random() * 440) {
+                createObstacle();
+                game.lastObstacleZ = game.position;
+            }
+
+            for (let i = obstacles.length - 1; i >= 0; i--) {
+                const obstacle = obstacles[i];
+                obstacle.position.z += game.velocity;
+                if (obstacle.position.z > 5) {
+                    scene.remove(obstacle);
+                    obstacles.splice(i, 1);
+                    game.isMeasuringReaction = false;
+                }
+            }
+
+            if (game.position > 10000 && !game.gameOver) {
+                endTest();
+            }
+
+            document.getElementById('speed').textContent = `速度: ${Math.floor(game.velocity * 200)} km/h`;
+            document.getElementById('score').textContent = `スコア: ${Math.floor(game.position / 10)}`;
+            renderer.render(scene, camera);
+        }
+
+        function endTest() {
+            if (game.gameOver) return;
+            game.gameOver = true;
+
+            const finalScore = Math.floor(game.position / 10);
+            const total = game.reactionTimes.reduce((sum, time) => sum + time, 0);
+            const avgReaction = game.reactionTimes.length > 0 ? (total / game.reactionTimes.length) : 0;
+
+            document.getElementById('exitBtn').style.display = 'none';
+
+            // Firebaseへ完了イベントを送信
+            if (window.logToFirebase) {
+                window.logToFirebase('test_complete', {
+                    age: game.subjectInfo.age,
+                    gender: game.subjectInfo.gender,
+                    score: finalScore,
+                    average_reaction_time: avgReaction,
+                    trial_count: game.reactionTimes.length,
+                    manual_exit: true
+                });
+            }
+
+            document.getElementById('finalScore').textContent = `最終スコア: ${finalScore}`;
+            document.getElementById('finalAvgReaction').textContent = `平均反応時間: ${avgReaction.toFixed(3)} 秒`;
+            document.getElementById('gameOver').style.display = 'block';
+        }
+
+        window.addEventListener('resize', () => {
+            if (!renderer) return;
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>**
